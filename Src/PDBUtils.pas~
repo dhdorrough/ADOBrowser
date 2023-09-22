@@ -1,0 +1,480 @@
+unit PDBUtils;
+
+interface
+
+uses
+  Types;
+
+type
+  TSearch_Type = (SEARCHING, SEARCH_FOUND, NOT_FOUND);
+
+procedure Alert(const Msg: string);
+procedure AlertFmt(const Msg: string; Args: array of const);
+function  ContainsWordS( Target: string;
+                         Data: string;
+                         MatchWholeWordsOnly: boolean): boolean;
+function  Empty(const s: string): boolean;
+function  ExtractFileBase(s: string): string;
+Function  FileExecute(FileName: String; WaitUntilDone: Boolean): Boolean;
+function  FileSize32(FileName: string): DWORD;
+function  GetKeyList(const aString: string): string;
+function  GetString(const aCaption, aDefault: string): string;
+function  IsAllNumeric(const aWord: string): boolean;
+function  IsMapName(const aWord: string): boolean;
+function  IsMonth(const mon: string): boolean;
+function  IsPhotoName(aWord: string): boolean;
+function  IsYear(var aWord: string): boolean;
+function  Min(a, b: integer): integer;
+function  MonthNumber(mon: string): integer;
+function  MyExtractFileExt(Ext: string): string;
+function  MyFileDateToDateTime( FileDate: integer;
+                                const FileName: string): TDateTime;
+function  NoiseWord(var aWord: string): boolean;
+function  StripDigits(const aWord: string): string;
+function  YearNumber(const aWord: string): integer;
+function  Yes(const Msg: string): boolean;
+function  YesfMT(const Msg: string; Args: array of const): boolean;
+
+implementation
+
+uses
+  SysUtils, Classes, StStrL, Dialogs, Controls, uGetString, ShellAPI,
+  Windows;
+
+const
+  MAX_NOISE_WORDS = 22;
+  Months = 'JAN,FEB,MAR,APR,MAY,JUN,JUL,AUG,SEP,OCT,NOV,DEC';
+  MonthNames = 'JANUARY,  FEBRUARY, MARCH,    APRIL,    MAY,      JUNE,     JULY,     AUGUST,   SEPTEMBER,OCTOBER,  NOVEMBER, DECEMBER';
+//              X---------X---------X---------X---------X---------X---------X---------X---------X---------X---------X---------X---------
+var
+  NoiseWords: array[0..MAX_NOISE_WORDS-1] of string =
+    ('IN', 'AND', 'OF', 'AT', 'TO', 'PICTURE', 'IMAGE', 'ON', 'THE', 'NEWDELL',
+     'NEWDELL-E', 'MY', 'PICTURES', 'FOR', 'JPG', 'DSCN', 'FRIENDS', 'FAMILY',
+     'PICTURE', 'UP', 'GROWING', 'ME');
+
+
+procedure Alert(const Msg: string);
+begin { Alert }
+  MessageDlg(msg, mtWarning, [mbOk], 0);
+end;  { Alert }
+
+procedure AlertFmt(const Msg: string; Args: array of const);
+begin
+  Alert(Format(Msg, Args));
+end;
+
+
+function ContainsWords( Target: string;
+                        Data: string;
+                        MatchWholeWordsOnly: boolean): boolean;
+  const
+    Delims = ', -._[];()?';
+  var
+    wcD, wcT, TW, DW: integer;
+    aWord: string;
+    DataWords: array of string;
+
+  function DataContainsWord(const aWord: string): boolean;
+    var
+      DW: integer;
+  begin { DataContainsWord }
+    result := false;
+    for DW := 0 to wcD-1 do
+      if aWord = DataWords[DW] then
+        begin
+          result := true;
+          exit;
+        end;
+  end; { DataContainsWord }
+
+begin
+  Target := UpperCase(Target);
+  Data   := UpperCase(Data);
+  if MatchWholeWordsOnly then
+    begin
+      wcD := WordCountL(Data, DELIMS);
+      SetLength(DataWords, wcD);
+      for DW := 1 to wcD do
+        DataWords[DW-1] := ExtractWordL(DW, Data, DELIMS);
+      wcT := WordCountL(Target, DELIMS);
+      // try to match each word of the target to any word in the data
+      for TW := 1 to wcT do
+        begin
+          aWord := ExtractWordL(TW, Target, DELIMS);
+          if not DataContainsWord(aWord) then
+            begin
+              result := false;
+              exit;
+            end;
+        end;
+      result := true; // iff every word was matched
+    end
+  else
+    result := Pos(Target, Data) > 0;
+end;
+
+function Empty(const s: string): boolean;
+begin
+  result := Trim(s) = '';
+end;
+
+function ExtractFileBase(s: string): string;
+  label 10;
+  var i: integer;
+begin { ExtractFileBase }
+  s := ExtractFileName(s);
+  { look for the right-most period }
+  for i := length(s) downto 1 do
+    if s[i] = '.' then
+      goto 10;
+  i := 0;
+  10: if i > 0 then
+    s := copy(s, 1, i-1);
+  result := s;
+end;  { ExtractFileBase }
+
+function FileSize32(FileName: string): DWORD;
+var
+  Find: THandle;
+  FindData: TWin32FindData;
+begin
+  Result:= 0;
+  Find:= FindFirstFile(pChar(FileName), FindData);
+  if Find<>INVALID_HANDLE_VALUE then
+  begin
+    Windows.FindClose(Find);
+    Result:= FindData.nFileSizeLow;
+  end;
+end;
+
+function  GetString(const aCaption, aDefault: string): string;
+begin
+  with TfrmGetString.Create(nil) do
+    begin
+      lblCaption.Caption := aCaption;
+      edtGetString.Text  := aDefault;
+      if ShowModal = mrOk then
+        result := edtGetString.Text;
+      Free;
+    end;
+end;
+
+function IsMonth(const mon: string): boolean;
+begin
+  result := MonthNumber(Mon) > 0;
+end;
+
+function  Min(a, b: integer): integer;
+begin
+  if a < b then
+    result := a
+  else
+    result := b;
+end;
+
+function MonthNumber(mon: string): integer;
+  var
+    idx: integer;
+begin
+  result := -1;
+  if Length(Mon) in [3..8] then
+    begin
+      Mon := UpperCase(mon);
+      idx := Pos(mon, months);
+      if idx > 0 then
+        begin
+          if ((idx - 1) mod 4) = 0 then
+            result := ((idx - 1) div 4) + 1
+        end
+      else
+        begin
+          idx := Pos(mon, MonthNames);
+          if idx > 0 then
+            begin
+              if ((idx - 1) mod 10) = 0 then
+                result := ((idx - 1) div 10) + 1
+            end;
+        end;
+    end;
+end;
+
+
+function MyExtractFileExt(Ext: string): string;
+begin
+  Ext    := ExtractFileExt(Ext);
+  result := UpperCase(Copy(Ext, 2, Length(Ext)-1));
+end;
+
+
+function InNoiseList(const aWord: string): boolean;
+  var
+    i: integer; u, l, m: integer; mode: TSearch_Type;
+begin
+  u := 0;
+  l := MAX_NOISE_WORDS-1;
+  mode := SEARCHING;
+  repeat
+    if u <= l then
+      begin
+        m := (u + l) div 2;
+
+        i := CompareText(aWord, NoiseWords[m]);
+        if i > 0 then
+          begin
+            if m < MAX_NOISE_WORDS - 1 then
+              u := m + 1
+            else
+              mode := NOT_FOUND
+          end else
+        if i < 0 then
+          begin
+            if m > 0 then
+              l := m - 1
+            else
+              mode := NOT_FOUND
+          end
+        else
+          mode := SEARCH_FOUND;
+      end
+    else
+      mode := NOT_FOUND;
+  until mode <> SEARCHING;
+
+  result := mode = SEARCH_FOUND;
+end;
+
+function IsMapName(const aWord: string): boolean;
+begin
+  result := false;
+  if (Length(aWord) >= 3) and (Length(aWord) <= 5) then
+    begin
+      if (aWord[1] in ['M', 'B', 'L', 'I']) and
+         (aWord[2] = '-') then
+        result := true else
+      if (aWord[1] = 'C') and (aWord[2] = 'T') and (aWord[3] = '-') then
+        result := true;
+    end
+end;
+
+
+function IsPhotoName(aWord: string): boolean;
+begin
+  aWord  := ExtractFileBase(aWord);
+  result := (Length(aWord) = 8) and
+            (aWord[1] = 'P') and
+            (aWord[2] in ['1'..'9', 'A'..'C']) and
+            IsAllNumeric(Copy(aWord, 3, 5));
+end;
+
+function NoiseWord(var aWord: string): boolean;
+begin
+  if Length(aWord) = 1 then
+    result := true else
+  if InNoiseList(aWord) then
+    result := true else
+  if IsAllNumeric(aWord) and (not IsYear(aWord)) then
+    result := true else
+  if IsPhotoName(aWord) then
+    result := true
+  else
+    result := false;
+end;
+
+function GetKeyList(const aString: string): string;
+  const
+    DELIMS = ' ,_()\:.?';
+  var
+    List: TStringList; i, KeysAdded: integer;
+
+  function AddKeys(const aDelims: string; LastChance: boolean): integer;
+    var
+      aWord: string; i: integer;
+  begin { AddKeys }
+    result := WordCountL(aString, aDelims);
+    if (result > 1) or LastChance then
+      for i := 1 to result do
+        begin
+          aWord := ExtractWordL(i, aString, DELIMS);
+//        if not IsYear(aWord) or IsMapName(aWord) or IsPhotoName(aWord) then
+//          aWord := StripDigits(aWord);
+          if Length(aWord) > 1 then
+            if (not NoiseWord(aWord)) and (List.IndexOf(aWord) < 0) then
+              List.Add(aWord);
+        end
+    else
+      result := 0;
+  end;  { AddKeys }
+
+begin { GetKeyList }
+  List := TStringList.Create;
+  try
+    KeysAdded := AddKeys(';', false);
+    if KeysAdded = 0 then
+      KeysAdded := AddKeys(',', false);
+    if KeysAdded = 0 then
+      KeysAdded := AddKeys(DELIMS, true);
+
+    if Keysadded > 0 then
+      begin
+        result := '';
+        for i := 0 to List.Count - 1 do
+          if result = '' then
+            result := List[i]
+          else
+            result := result + ' ' + List[i];
+      end;
+  finally
+    List.Free;
+  end;
+end; { GetKeyList }
+
+function StripDigits(const aWord: string): string;
+  var
+    i: integer;
+begin
+  result := '';
+  for i := 1 to Length(aWord) do
+    if not (aWord[i] in ['0'..'9']) then
+      result := result + aWord[i];
+end;
+
+function YearNumber(const aWord: string): integer;
+begin
+  result := -1;
+  if IsAllNumeric(aWord) then
+    begin
+      if Length(aWord) = 4 then
+        result := StrToInt(aWord) else
+      if Length(aWord) = 2 then
+        begin
+          result := StrToInt(aWord);
+          if (result >= 60) and (result <= 99) then
+            result  := 1900 + result;    // normalize
+        end;
+    end;
+end;
+
+function IsYear(var aWord: string): boolean;
+  var
+    Year: integer;
+begin
+  Year   := YearNumber(aWord);
+  result := (Year >= 1900) and (Year <= 2020);
+end;
+
+function IsAllNumeric(const aWord: string): boolean;
+  var
+    p: pchar;
+begin
+  result := false;
+  p := pchar(aWord);
+  while p^ <> #0 do
+    begin
+      if not (p^ in ['0'..'9']) then
+        exit
+      else
+        inc(p);
+    end;
+  result := true;
+end;
+
+procedure Init_NoiseWords;
+  var
+    i, j: integer; temp: string;
+begin
+  for i := 0 to MAX_NOISE_WORDS-2 do
+    for j := i+1 to MAX_NOISE_WORDS-1 do
+      if NoiseWords[i] > NoiseWords[j] then
+        begin
+          temp          := NoiseWords[i];
+          NoiseWords[i] := NoiseWords[j];
+          NoiseWords[j] := temp;
+        end;
+end;
+
+function Yes(const msg: string): boolean;
+begin
+  Result := MessageDlg(msg, mtConfirmation, [mbYes, mbNo], 0)=mrYes;
+end;
+
+function YesfMT(const Msg: string; Args: array of const): boolean;
+begin
+  result := Yes(Format(Msg, Args));
+end;
+
+// Try to use the date recorded by the camera rather than the date that the
+// file may have been updated.
+function MyFileDateToDateTime( FileDate: integer;
+                               const FileName: string): TDateTime;
+  var
+    FileBase: string; M: char; DD: string; Year, Month, Day: word;
+begin
+  if FileDate > 1 then
+    result    := FileDateToDateTime(FileDate)
+  else
+    result := -1;
+  if IsPhotoName(FileBase) then
+    begin
+      DecodeDate(result, Year, Month, Day);
+
+      M := FileBase[2];
+      if (M in ['0'..'9']) then
+        Month := Ord(M) - ord('0') else
+      if (M in ['A'..'C']) then
+        Month := Ord(M) - Ord('A') + 10;
+
+      DD := Copy(FileBase, 3, 2);
+      Day := StrToInt(DD);
+
+      if (Year > 1998) and (Year <= 2020) and (Month >= 1) and (Month <= 12)
+          and (Day >= 1) and (Day <= 31) then
+        begin
+          try
+            result := EncodeDate(Year, Month, Day);
+          except
+            // use the file date
+          end;
+        end;
+    end;
+end;
+
+Function FileExecute(FileName: String; WaitUntilDone: Boolean): Boolean;
+var
+  zAppName: array[0..512] of char;
+  zCurDir:  array[0..255] of char;
+  WorkDir:  String;
+  StartupInfo: TStartupInfo;
+  ProcessInfo: TProcessInformation;
+  ProcessResult : LongWord ;
+begin
+  StrPCopy(zAppName,FileName);
+  GetDir(0,WorkDir);
+  StrPCopy(zCurDir,WorkDir);
+  FillChar(StartupInfo,Sizeof(StartupInfo),#0);
+  StartupInfo.cb := Sizeof(StartupInfo);
+
+
+  StartupInfo.dwFlags     := STARTF_USESHOWWINDOW;
+  StartupInfo.wShowWindow := SW_SHOW;
+  Result := CreateProcess(nil,
+    zAppName,                      { pointer to command line string }
+    nil,                           { pointer to process security attributes }
+    nil,                           { pointer to thread security attributes }
+    false,                         { handle inheritance flag }
+    CREATE_NEW_CONSOLE or          { creation flags }
+    NORMAL_PRIORITY_CLASS,
+    nil,                           { pointer to new environment block }
+    nil,                           { pointer to current directory name }
+    StartupInfo,                   { pointer to STARTUPINFO }
+    ProcessInfo) ;                 { pointer to PROCESS_INF }
+
+  If Result And WaitUntilDone Then
+    Begin
+      WaitforSingleObject(ProcessInfo.hProcess, INFINITE);
+      GetExitCodeProcess(ProcessInfo.hProcess, ProcessResult);
+    End;
+end;
+
+initialization
+  Init_NoiseWords;
+end.
