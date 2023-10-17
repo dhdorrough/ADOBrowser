@@ -1,3 +1,5 @@
+// Program was compiled with Delphi 7.0 (Build 8.1)
+// Program uses Turbo Power Systools library (available on SourceForge)
 program ADOBrowser;
 
 uses
